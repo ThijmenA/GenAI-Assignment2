@@ -174,21 +174,25 @@ class BinaryCLT:
         n_vars = self.data.shape[1]
         samples = np.zeros((nsamples, n_vars), dtype=int)
 
-        calculation_order = sorted(list(range(n_vars)), key=lambda x: self.tree[x])
-        print(calculation_order)
-
         samples[:, self.root] = np.random.choice([0, 1], size=nsamples, p=params[self.root, 0, :])
 
-        for i in calculation_order:
-            if self.tree[i] != -1:
-                # Sample the child given the parent
-                parent_val = samples[:, self.tree[i]]
-                samples[:, i] = np.random.binomial(n=1, p=params[i, parent_val, 1])
+        next_nodes = [i for i, parent in enumerate(self.tree) if parent == self.root]
+
+        while next_nodes:
+            # Get the next node to sample
+            current_node = next_nodes.pop(0)
+
+            # Sample the current node given its parent
+            parent_val = samples[:, self.tree[current_node]]
+            samples[:, current_node] = np.random.binomial(n=1, p=params[current_node, parent_val, 1])
+
+            # Find the children of the current node
+            children = [i for i, parent in enumerate(self.tree) if parent == current_node]
+
+            # Add children to the list of nodes to sample
+            next_nodes.extend(children)
 
         return samples
-
-
-
 
 
 def test_get_tree_simple():
@@ -196,12 +200,12 @@ def test_get_tree_simple():
     # X2 and X3 are highly correlated
     # X0 and X2 are somewhat correlated
     data = np.array([
-        [0, 0, 1, 0],
-        [0, 0, 1, 0],
+        [0, 0, 0, 0],
+        [0, 0, 0, 0],
         [0, 0, 1, 1],
         [0, 0, 1, 1],
-        [1, 1, 1, 0],
-        [1, 1, 1, 0],
+        [1, 1, 0, 0],
+        [1, 1, 0, 0],
         [1, 1, 1, 1],
         [1, 1, 1, 1]
     ])
@@ -215,15 +219,18 @@ def test_get_tree_simple():
     # The expected tree structure [-1, 0, 0, 2]
 
     # Different root (X2)
-    # clt2 = BinaryCLT(data, root=2)
-    # tree2 = clt2.get_tree()
+    clt2 = BinaryCLT(data, root=2)
+    tree2 = clt2.get_tree()
 
-    # print("Tree with root at X2:", tree2)
+    print("Tree with root at X2:", tree2)
     # Expected structure [2, 0, -1, 2]
 
-    print(np.exp(clt.get_log_params()))
-    samples = clt.sample(10_000)
+
+    print(np.exp(clt2.get_log_params()))
+
+    samples = clt2.sample(10_000)
     print(np.sum(samples, axis=0) / len(samples))
+
 
     print(np.sum(samples[samples[:, 0] == 0][:, 1]) / len(samples[samples[:, 0] == 1]))
 
