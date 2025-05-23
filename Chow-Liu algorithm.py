@@ -1,12 +1,12 @@
-from scipy.sparse.csgraph import minimum_spanning_tree
-from scipy.sparse.csgraph import breadth_first_order
-from scipy.special import logsumexp
-import numpy as np
-import itertools
 import csv
+import itertools
+
+import numpy as np
+from scipy.sparse.csgraph import breadth_first_order, minimum_spanning_tree
+from scipy.special import logsumexp
 
 # Debugging flag for get_tree function
-debugging_get_tree = False
+debugging_get_tree = True
 
 
 class BinaryCLT:
@@ -18,7 +18,7 @@ class BinaryCLT:
         self.root = root
         self.alpha = alpha
 
-        pass
+        self.tree = None
 
     def get_tree(self):
         """
@@ -40,7 +40,11 @@ class BinaryCLT:
         counts_1 = 2 * self.alpha + np.sum(self.data == 1, axis=0)
         total = 4 * self.alpha + self.data.shape[0] # number of samples; add alpha for each combination
 
+        self.counts_0 = counts_0
+        self.counts_1 = counts_1
+
         p_x = np.stack([counts_0, counts_1]) / total # Probability of each variable being 0 or 1
+        self.p_x = p_x
 
         # Calculate joint probabilities with Laplace smoothing
         for i in range(n_vars):
@@ -90,7 +94,7 @@ class BinaryCLT:
         # Initialize the tree with -1 (no parent)
         tree = [-1] * n_vars
 
-        # Convert the MST to a directed tree by selecting a root   
+        # Convert the MST to a directed tree by selecting a root
         # If root is None, choose a random root
         root = self.root if self.root is not None else np.random.randint(0, n_vars)
 
@@ -112,17 +116,50 @@ class BinaryCLT:
                 # If the predecessor is valid, set it as the parent
                 if predecessors[i] >= 0 and predecessors[i] < n_vars:
                     tree[i] = predecessors[i]
-                    
+
         tree = [int(x) for x in tree]
+        self.tree = tree
         return tree
+
 
     def get_log_params(self):
         """
+        Computes the log-conditional probability tables for each node given its parent, using Laplace smoothing.
 
+        Returns:
+            np.ndarray: An D x 2 x 2 array where log_params[i, j, k] = log(P(X_i = k | X_parent = j))
         """
+        if self.tree is None:
+            raise ValueError("Tree has not been computed. Call get_tree() first.")
 
-        pass
-    
+        n_vars = self.data.shape[1]
+        log_params = np.zeros((n_vars, 2, 2))  # Shape: D x 2 x 2
+
+        for i in range(n_vars):
+            parent = self.tree[i]
+
+            if parent == -1:
+                # Root node: use marginal probabilities (Laplace smoothed)
+                counts_0 = self.alpha + np.sum(self.data[:, i] == 0)
+                counts_1 = self.alpha + np.sum(self.data[:, i] == 1)
+                total = counts_0 + counts_1
+
+                p_0 = counts_0 / total
+                p_1 = counts_1 / total
+
+                log_params[i, :, 0] = np.log(p_0)
+                log_params[i, :, 1] = np.log(p_1)
+            else:
+                # Conditional counts
+                for parent_val in [0, 1]:
+                    for child_val in [0, 1]:
+                        count = self.alpha + np.sum((self.data[:, parent] == parent_val) & (self.data[:, i] == child_val))
+
+                        total = 2 * self.alpha + np.sum(self.data[:, parent] == parent_val)
+                        log_params[i, parent_val, child_val] = np.log(count / total)
+
+        return log_params
+
     def log_prob(self, x, exhaustive=False):
         """
 
@@ -146,30 +183,33 @@ def test_get_tree_simple():
     # X2 and X3 are highly correlated
     # X0 and X2 are somewhat correlated
     data = np.array([
-        [0, 0, 0, 0],
-        [0, 0, 0, 0],
+        [0, 0, 1, 0],
+        [0, 0, 1, 0],
         [0, 0, 1, 1],
-        [0, 0, 1, 1],
-        [1, 1, 0, 0],
-        [1, 1, 0, 0],
-        [1, 1, 1, 1],
+        [1, 0, 1, 1],
+        [1, 1, 1, 0],
+        [1, 1, 1, 0],
+        [1, 0, 1, 1],
         [1, 1, 1, 1]
     ])
-    
+
     # Create a BinaryCLT with a fixed root (X0)
     clt = BinaryCLT(data, root=0)
     tree = clt.get_tree()
-    
+
     print("Tree with root at X0:", tree)
-    
+
     # The expected tree structure [-1, 0, 0, 2]
-    
+
     # Different root (X2)
-    clt2 = BinaryCLT(data, root=2)
-    tree2 = clt2.get_tree()
-    
-    print("Tree with root at X2:", tree2)
+    # clt2 = BinaryCLT(data, root=2)
+    # tree2 = clt2.get_tree()
+
+    # print("Tree with root at X2:", tree2)
     # Expected structure [2, 0, -1, 2]
+
+    print(np.exp(clt.get_log_params()))
+    print(np.exp(clt.get_log_params()[0, :, 0]))
 
 if debugging_get_tree:
     test_get_tree_simple()
