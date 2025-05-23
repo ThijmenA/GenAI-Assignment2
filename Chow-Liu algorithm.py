@@ -40,11 +40,7 @@ class BinaryCLT:
         counts_1 = 2 * self.alpha + np.sum(self.data == 1, axis=0)
         total = 4 * self.alpha + self.data.shape[0] # number of samples; add alpha for each combination
 
-        self.counts_0 = counts_0
-        self.counts_1 = counts_1
-
         p_x = np.stack([counts_0, counts_1]) / total # Probability of each variable being 0 or 1
-        self.p_x = p_x
 
         # Calculate joint probabilities with Laplace smoothing
         for i in range(n_vars):
@@ -171,8 +167,25 @@ class BinaryCLT:
         """
 
         """
+        if self.tree is None:
+            raise ValueError("Tree has not been computed. Call get_tree() first.")
 
-        pass
+        params = np.exp(self.get_log_params())
+        n_vars = self.data.shape[1]
+        samples = np.zeros((nsamples, n_vars), dtype=int)
+
+        calculation_order = sorted(list(range(n_vars)), key=lambda x: self.tree[x])
+        print(calculation_order)
+
+        samples[:, self.root] = np.random.choice([0, 1], size=nsamples, p=params[self.root, 0, :])
+
+        for i in calculation_order:
+            if self.tree[i] != -1:
+                # Sample the child given the parent
+                parent_val = samples[:, self.tree[i]]
+                samples[:, i] = np.random.binomial(n=1, p=params[i, parent_val, 1])
+
+        return samples
 
 
 
@@ -186,10 +199,10 @@ def test_get_tree_simple():
         [0, 0, 1, 0],
         [0, 0, 1, 0],
         [0, 0, 1, 1],
-        [1, 0, 1, 1],
+        [0, 0, 1, 1],
         [1, 1, 1, 0],
         [1, 1, 1, 0],
-        [1, 0, 1, 1],
+        [1, 1, 1, 1],
         [1, 1, 1, 1]
     ])
 
@@ -209,7 +222,10 @@ def test_get_tree_simple():
     # Expected structure [2, 0, -1, 2]
 
     print(np.exp(clt.get_log_params()))
-    print(np.exp(clt.get_log_params()[0, :, 0]))
+    samples = clt.sample(10_000)
+    print(np.sum(samples, axis=0) / len(samples))
+
+    print(np.sum(samples[samples[:, 0] == 0][:, 1]) / len(samples[samples[:, 0] == 1]))
 
 if debugging_get_tree:
     test_get_tree_simple()
