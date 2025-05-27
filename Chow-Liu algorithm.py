@@ -19,6 +19,9 @@ class BinaryCLT:
         self.alpha = alpha
 
         self.tree = None
+        self.children = None      
+        self.postorder = None     
+        self._log_params = None   
 
     def get_tree(self):
         """
@@ -115,6 +118,11 @@ class BinaryCLT:
 
         tree = [int(x) for x in tree]
         self.tree = tree
+        self.children = [[] for _ in range(n_vars)]
+        for c, p in enumerate(self.tree):
+            if p != -1:
+                self.children[p].append(c)
+        self.postorder = order[::-1]
         return tree
 
 
@@ -158,10 +166,83 @@ class BinaryCLT:
 
     def log_prob(self, x, exhaustive=False):
         """
-
+        Row-wise log p(y)  —  x may contain NaN for unobserved variables.
         """
+        if self.tree is None:
+            raise ValueError("Tree has not been computed. Call get_tree() first.")
 
-        pass
+        # --- ensure children / postorder exist (robust if user called get_tree() before)
+        if self.children is None or self.postorder is None:
+            n = len(self.tree)
+            self.children = [[] for _ in range(n)]
+            for c, p in enumerate(self.tree):
+                if p != -1:
+                    self.children[p].append(c)
+            order, _ = breadth_first_order(
+                np.ones((n, n)), i_start=self.root, directed=False, return_predecessors=False
+            )
+            self.postorder = order[::-1]
+
+        x = np.asarray(x, dtype=float)
+        n_rows, d = x.shape
+        out = np.zeros(n_rows)
+        log_cpt = self.get_log_params()
+
+        for r in range(n_rows):
+            row = x[r]
+
+            # ---------- fully observed fast path
+            if not np.isnan(row).any():
+                logp = log_cpt[self.root, 0, int(row[self.root])]
+                for v in range(d):
+                    p = self.tree[v]
+                    if p != -1:
+                        logp += log_cpt[v, int(row[p]), int(row[v])]
+                out[r] = logp
+                continue
+
+            # ---------- exhaustive enumeration
+            if exhaustive:
+                missing = np.where(np.isnan(row))[0]
+                terms = []
+                for ass in itertools.product((0, 1), repeat=len(missing)):
+                    filled = row.copy()
+                    filled[missing] = ass
+                    terms.append(self.log_prob(filled.reshape(1, -1))[0])
+                out[r] = logsumexp(terms)
+                continue
+
+            # ---------- variable elimination (message passing on tree)
+            msg = np.zeros((d, 2))                # msg[v, k] = log m_{v→parent}(k)
+
+            for v in self.postorder:
+                # evidence for node v (length-2 array)
+                if np.isnan(row[v]):
+                    ev = np.zeros(2)
+                else:
+                    k_obs = int(row[v])
+                    ev = np.array([0.0, -np.inf]) if k_obs == 0 else np.array([-np.inf, 0.0])
+
+                # pre-compute contribution from children for each state k of v
+                child_sum = np.zeros(2)
+                for c in self.children[v]:
+                    child_sum += msg[c]           # msg[c,k] already conditioned on k
+
+                if v == self.root:
+                    # final log p(y) = log ∑_k P(root=k)·evidence·child-msgs
+                    root_terms = log_cpt[self.root, 0] + ev + child_sum
+                    out[r] = logsumexp(root_terms)
+                else:
+                    parent_vals = (0, 1)
+                    for pv in parent_vals:
+                        # for each parent state pv compute message m_{v→p}(pv)
+                        terms = log_cpt[v, pv] + ev + child_sum  # vector over k∈{0,1}
+                        msg[v, pv] = logsumexp(terms)
+
+
+        return out
+    
+
 
     def sample(self, nsamples):
         """
@@ -234,5 +315,51 @@ def test_get_tree_simple():
 
     print(np.sum(samples[samples[:, 0] == 0][:, 1]) / len(samples[samples[:, 0] == 1]))
 
+def clt_nltcs_demo(
+    ds_path="Density-Estimation-Datasets/datasets/nltcs",
+    alpha=0.01,
+    root=0,
+    nan_ratio=0.05,
+):
+    """
+    Train on NLTCS, then print:
+      • parent array
+      • train / test average LL
+      • 5 %-NaN query runtime + consistency (exhaustive vs VE)
+      • 1000-sample average LL
+    """
+    # --- load data -------------------------------------------------
+    train = np.genfromtxt(f"{ds_path}/nltcs.train.data", delimiter=",")
+    test  = np.genfromtxt(f"{ds_path}/nltcs.test.data",  delimiter=",")
+
+    # --- train CLT -------------------------------------------------
+    clt = BinaryCLT(train, root=root, alpha=alpha)
+    clt.get_tree()
+
+    print("Parents:", clt.tree)
+    print("AvgLL train:", clt.log_prob(train).mean())
+    print("AvgLL test :", clt.log_prob(test ).mean())
+
+    # --- 5 % NaN query set ----------------------------------------
+    q = test.copy()
+    idx = np.random.choice(q.size, int(nan_ratio * q.size), replace=False)
+    q.flat[idx] = np.nan
+
+    import time
+    t0 = time.time(); lp_ex = clt.log_prob(q, exhaustive=True ); te = time.time() - t0
+    t0 = time.time(); lp_ve = clt.log_prob(q, exhaustive=False); tv = time.time() - t0
+
+    print(f"NaN-queries  enumeration {te:.3f}s   VE {tv:.3f}s")
+    print("Max Δ", np.max(np.abs(lp_ex - lp_ve)))
+    print("All-close", np.allclose(lp_ex, lp_ve))
+
+    # --- sampling --------------------------------------------------
+    samp = clt.sample(1000)
+    print("AvgLL sample:", clt.log_prob(samp).mean())
+
+
 if debugging_get_tree:
     test_get_tree_simple()
+
+if __name__ == "__main__":
+    clt_nltcs_demo()
