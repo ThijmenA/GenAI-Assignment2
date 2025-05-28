@@ -6,7 +6,7 @@ from scipy.sparse.csgraph import breadth_first_order, minimum_spanning_tree
 from scipy.special import logsumexp
 
 # Debugging flag for get_tree function
-debugging_get_tree = True
+debugging_get_tree = False
 
 
 class BinaryCLT:
@@ -19,9 +19,9 @@ class BinaryCLT:
         self.alpha = alpha
 
         self.tree = None
-        self.children = None      
-        self.postorder = None     
-        self._log_params = None   
+        self.children = None
+        self.postorder = None
+        self._log_params = None
 
     def get_tree(self):
         """
@@ -241,7 +241,7 @@ class BinaryCLT:
 
 
         return out
-    
+
 
 
     def sample(self, nsamples):
