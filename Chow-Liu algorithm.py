@@ -12,7 +12,7 @@ debugging_get_tree = False
 class BinaryCLT:
     def __init__(self, data, root=None, alpha=0.01):
         """
-
+        Initializes the BinaryCLT with the given data, root, and alpha for Laplace smoothing.
         """
         self.data = data
         self.root = root
@@ -246,7 +246,11 @@ class BinaryCLT:
 
     def sample(self, nsamples):
         """
-
+        Generates samples from the learned binary CLT.
+        Args:
+            nsamples (int): Number of samples to generate.
+        Returns:
+            np.ndarray: A 2D array of shape (nsamples, n_vars) containing the sampled values.
         """
         if self.tree is None:
             raise ValueError("Tree has not been computed. Call get_tree() first.")
@@ -270,7 +274,6 @@ class BinaryCLT:
             # Find the children of the current node
             children = [i for i, parent in enumerate(self.tree) if parent == current_node]
 
-            # Add children to the list of nodes to sample
             next_nodes.extend(children)
 
         return samples
@@ -312,8 +315,9 @@ def test_get_tree_simple():
     samples = clt2.sample(10_000)
     print(np.sum(samples, axis=0) / len(samples))
 
-
     print(np.sum(samples[samples[:, 0] == 0][:, 1]) / len(samples[samples[:, 0] == 1]))
+
+    print("Samples shape:", samples.shape)
 
 def clt_nltcs_demo(
     ds_path="Density-Estimation-Datasets/datasets/nltcs",
